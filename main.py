@@ -69,4 +69,37 @@ async def main():
 
 
 if __name__ == "__main__":
+    import asyncio
+from pyrogram import Client, idle
+
+# Inisialisasi app Pyrogram Anda
+app = Client(...) 
+
+async def main():
+    await app.start()
+    print("UBot berhasil login!")
+
+    # 1. Mencegah error 'Peer id invalid' dengan memuat cache dialog saat startup
+    print("Memuat cache dialog...")
+    try:
+        async for dialog in app.get_dialogs(limit=200):
+            pass
+        print("Cache dialog berhasil dimuat!")
+    except Exception as e:
+        print(f"Gagal memuat dialog cache: {e}")
+
+    # 2. Pancing ID channel log yang ada di error log Anda
+    log_channels = [-1003700496828, -1003329231332]
+    for cid in log_channels:
+        try:
+            await app.get_chat(cid)
+        except Exception:
+            pass
+
+    print("UBot siap menerima perintah!")
+    await idle()
+    await app.stop()
+
+if __name__ == "__main__":
     asyncio.run(main())
+    
