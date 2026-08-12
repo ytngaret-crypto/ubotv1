@@ -2,9 +2,9 @@ import asyncio
 import logging
 import importlib
 from pyrogram import Client, idle
-from pyrogram.errors import PeerIdInvalid, KeyError
+from pyrogram.errors import PeerIdInvalid, RPCError
 
-# Import seluruh modul config dan database asli dari zip Anda
+# Import module internal bawaan zip Anda
 import config
 from database import init_db
 
@@ -14,15 +14,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("UBot")
 
-# Mencegah error 'Peer id invalid' dari Telegram mematikan bot
+# Menangani error Telegram agar tidak mematikan task dispatcher
 def global_exception_handler(loop, context):
     msg = context.get("exception", context.get("message"))
     if "Peer id invalid" in str(msg) or "ID not found" in str(msg):
-        logger.warning(f"Abaikan Peer ID Invalid: {msg}")
+        logger.warning(f"Mengabaikan Peer ID Invalid: {msg}")
     else:
         logger.error(f"Loop Exception: {msg}")
 
-# Deteksi otomatis instance Pyrogram Client dari config.py
+# Deteksi otomatis instance Client Pyrogram dari config.py
 clients = []
 for attr_name in dir(config):
     attr = getattr(config, attr_name)
@@ -30,7 +30,6 @@ for attr_name in dir(config):
         clients.append(attr)
 
 if not clients:
-    # Jika tidak ada instance Client di config.py, buat dari variabel environment
     import os
     API_ID = os.getenv("API_ID")
     API_HASH = os.getenv("API_HASH")
@@ -47,7 +46,7 @@ if not clients:
 primary_client = clients[0]
 
 async def safe_cache_dialogs():
-    """Mengisi cache peer ID di SQLite local secara background."""
+    """Memuat cache peer ID secara background agar Pyrogram menyimpan ID chat."""
     try:
         async for dialog in primary_client.get_dialogs(limit=100):
             _ = dialog.chat.id
@@ -55,7 +54,6 @@ async def safe_cache_dialogs():
         logger.warning(f"Cache dialog error (dilewati): {e}")
 
 async def main():
-    # Pasang exception handler pada event loop
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(global_exception_handler)
 
@@ -66,12 +64,12 @@ async def main():
     except Exception as e:
         logger.warning(f"Database init warning: {e}")
 
-    # 2. Start semua Client Pyrogram yang terdeteksi
+    # 2. Jalankan Client Pyrogram
     logger.info("Starting UBot Clients...")
     for c in clients:
         await c.start()
 
-    # 3. Import Handlers SETELAH Client aktif agar semua command (.menu, .mute, .ban) terdaftar
+    # 3. Load Handlers (.menu, .mute, .ban, dll) setelah Client aktif
     try:
         logger.info("Loading handlers...")
         importlib.import_module("handlers")
@@ -79,18 +77,16 @@ async def main():
     except Exception as e:
         logger.error(f"Gagal memuat handlers: {e}")
 
-    # 4. Jalankan pancingan cache dialog di background
+    # 4. Pancing cache dialog di background
     asyncio.create_task(safe_cache_dialogs())
 
     me = await primary_client.get_me()
-    logger.info(f"UBot Aktif sebagai {me.first_name} ({me.id})! Silakan tes .menu di Telegram.")
+    logger.info(f"UBot Aktif sebagai {me.first_name} ({me.id})! Coba ketik .menu di Telegram.")
 
     await idle()
 
-    # Stop clients saat shutdown
     for c in clients:
         await c.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
