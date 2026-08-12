@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import importlib
+import os
 from pyrogram import Client, idle
 from pyrogram.errors import PeerIdInvalid, RPCError
 
-# Import module internal bawaan project
+# Import module internal
 import config
 import database
 
@@ -14,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("UBot")
 
-# Exception handler agar error Peer ID Invalid tidak membuat bot crash
+# Exception handler agar error Peer ID Invalid tidak mematikan task Pyrogram
 def global_exception_handler(loop, context):
     msg = context.get("exception", context.get("message"))
     if "Peer id invalid" in str(msg) or "ID not found" in str(msg):
@@ -30,7 +31,6 @@ for attr_name in dir(config):
         clients.append(attr)
 
 if not clients:
-    import os
     API_ID = os.getenv("API_ID")
     API_HASH = os.getenv("API_HASH")
     SESSION_STRING = os.getenv("SESSION_STRING") or os.getenv("HU_STRING") or os.getenv("SESSION")
@@ -46,7 +46,7 @@ if not clients:
 primary_client = clients[0]
 
 async def safe_cache_dialogs():
-    """Memuat cache peer ID secara background."""
+    """Memuat cache peer ID secara background agar Pyrogram menyimpan ID chat."""
     try:
         async for dialog in primary_client.get_dialogs(limit=100):
             _ = dialog.chat.id
@@ -57,7 +57,7 @@ async def main():
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(global_exception_handler)
 
-    # Inisialisasi database jika ada fungsi khusus di database.py
+    # Inisialisasi Database
     for func_name in ["init_db", "setup_db", "init_database", "create_tables"]:
         if hasattr(database, func_name):
             func = getattr(database, func_name)
@@ -71,24 +71,33 @@ async def main():
                 logger.warning(f"Database init warning: {e}")
             break
 
-    # Start semua Client Pyrogram
+    # Start Client Pyrogram
     logger.info("Starting UBot Clients...")
     for c in clients:
         await c.start()
 
-    # Load Handlers (.menu, .mute, .ban, dll) setelah Client aktif
-    try:
-        logger.info("Loading handlers...")
-        importlib.import_module("handlers")
-        logger.info("Seluruh handler berhasil dimuat!")
-    except Exception as e:
-        logger.error(f"Gagal memuat handlers: {e}")
+    # IMPORT SEMUA SUB-MODULE HANDLER (Sangat Penting agar .menu, .mute, .ban merespon)
+    handler_modules = [
+        "handlers.commands",
+        "handlers.callbacks",
+        "handlers.settings",
+        "handlers.message",
+        "handlers"
+    ]
+    
+    logger.info("Mendaftarkan seluruh perintah (.menu, .mute, .ban, dll)...")
+    for mod in handler_modules:
+        try:
+            importlib.import_module(mod)
+            logger.info(f"Berhasil memuat module: {mod}")
+        except Exception as e:
+            logger.warning(f"Info modul {mod}: {e}")
 
-    # Pancing cache dialog di background
+    # Pancing cache dialog secara async di background
     asyncio.create_task(safe_cache_dialogs())
 
     me = await primary_client.get_me()
-    logger.info(f"UBot Aktif sebagai {me.first_name} ({me.id})! Silakan tes .menu di Telegram.")
+    logger.info(f"UBot AKTIF & SIAP sebagai {me.first_name} ({me.id})! Tes perintah .menu di Telegram.")
 
     await idle()
 
@@ -97,4 +106,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                    
+                           
