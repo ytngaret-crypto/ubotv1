@@ -1,87 +1,86 @@
+import os
 import asyncio
 import logging
 from pyrogram import Client, idle
-from pyrogram.errors import PeerIdInvalid, RPCError
+from pyrogram.errors import PeerIdInvalid
 
-# Menggunakan import & variabel sesuai dengan struktur file project Anda
-from config import API_ID, API_HASH, SESSION_STRING
-from database import init_db
-import handlers  # Mengimpor seluruh handler (.menu, .mute, .ban, dll)
+# Membaca variabel langsung dari Environment Variables Railway Anda
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+SESSION_STRING = os.getenv("SESSION_STRING") or os.getenv("HU_STRING") or os.getenv("SESSION")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Setup logging agar log Railway tetap informatif
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("UBot")
 
-# Inisialisasi app Pyrogram sesuai konfigurasi ubot Anda
-app = Client(
+# Inisialisasi Client Pyrogram langsung dari Environment Variables
+pyro_client = Client(
     "ubot_session",
-    api_id=API_ID,
+    api_id=int(API_ID) if API_ID else None,
     api_hash=API_HASH,
     session_string=SESSION_STRING,
-    plugins=dict(root="handlers")  # Memastikan seluruh modul handler di-load otomatis
+    plugins=dict(root="handlers")  # Memuat seluruh fitur di folder handlers otomatis
 )
 
-# Exception handler agar error Peer ID / KeyError dari Telegram TIDAK membuat bot crash
+bot_client = None
+if BOT_TOKEN:
+    bot_client = Client(
+        "inline_bot",
+        api_id=int(API_ID) if API_ID else None,
+        api_hash=API_HASH,
+        bot_token=BOT_TOKEN
+    )
+
+# Exception handler agar error Peer ID Invalid dari Telegram tidak mematikan ubot
 def global_exception_handler(loop, context):
     msg = context.get("exception", context.get("message"))
     if "Peer id invalid" in str(msg) or "ID not found" in str(msg):
-        logger.warning(f"Mengabaikan Peer ID Invalid (Non-fatal): {msg}")
+        logger.warning(f"Mengabaikan Peer ID Invalid: {msg}")
     else:
-        logger.error(f"Unhandled Loop Exception: {msg}")
+        logger.error(f"Loop Exception: {msg}")
 
-async def safe_load_cache():
-    """Memuat cache dialog secara background agar Pyrogram mengenali ID chat."""
-    logger.info("Memulai sinkronisasi cache peer...")
+async def safe_cache_dialogs():
+    """Mengisi cache peer ID di SQLite local secara background tanpa mengganggu perintah bot."""
     try:
-        async for dialog in app.get_dialogs(limit=150):
+        async for dialog in pyro_client.get_dialogs(limit=100):
             _ = dialog.chat.id
-        logger.info("Sinkronisasi cache dialog selesai.")
-    except (PeerIdInvalid, KeyError, ValueError) as e:
-        logger.warning(f"Beberapa peer dilewati saat caching: {e}")
     except Exception as e:
-        logger.error(f"Gagal memuat cache dialog: {e}")
-
-async def safe_resolve_log_channels():
-    """Mencoba meresolve channel log yang muncul di log error (-1003700496828 & -1003329231332)."""
-    target_channels = [-1003700496828, -1003329231332]
-    for cid in target_channels:
-        try:
-            await app.get_chat(cid)
-            logger.info(f"Berhasil meresolve channel: {cid}")
-        except RPCError as e:
-            logger.warning(f"Gagal resolve channel {cid}: {e.MESSAGE}")
-        except Exception as e:
-            logger.warning(f"Gagal resolve channel {cid}: {e}")
+        logger.warning(f"Cache dialog error (dilewati): {e}")
 
 async def main():
-    # Set handler error pada asyncio event loop
+    # Pasang exception handler pada event loop asyncio
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(global_exception_handler)
 
-    # Inisialisasi database SQLite/Store internal ubot Anda
-    logger.info("Inisialisasi database...")
-    if hasattr(init_db, "__call__"):
-        await init_db() if asyncio.iscoroutinefunction(init_db) else init_db()
+    # Coba inisialisasi database jika modul database ada
+    try:
+        from database import init_db
+        await init_db()
+    except Exception as e:
+        logger.warning(f"Database init skipped/warning: {e}")
 
-    logger.info("Starting UBot...")
-    await app.start()
+    logger.info("Starting UBot dari Variables Railway...")
+    await pyro_client.start()
 
-    me = await app.get_me()
-    logger.info(f"Logged in as {me.first_name} ({me.id})")
+    if bot_client:
+        try:
+            await bot_client.start()
+        except Exception as e:
+            logger.warning(f"Bot client start warning: {e}")
 
-    # Jalankan caching & pancingan channel log secara async (tanpa mem-blokir bot)
-    asyncio.create_task(safe_load_cache())
-    asyncio.create_task(safe_resolve_log_channels())
+    # Jalankan pancingan cache dialog secara background
+    asyncio.create_task(safe_cache_dialogs())
 
-    logger.info("UBot aktif! Seluruh fitur (.menu, .mute, .ban, dll) siap digunakan.")
+    logger.info("UBot successfully started! Fitur (.menu, dll) siap digunakan.")
     await idle()
-    await app.stop()
+
+    await pyro_client.stop()
+    if bot_client:
+        await bot_client.stop()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("UBot dihentikan.")
+    asyncio.run(main())
